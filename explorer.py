@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import subprocess
 import platform
+import json
 
 
 class FileExplorer:
@@ -10,7 +11,11 @@ class FileExplorer:
         self.root = root
         self.root.title("File Explorer")
         self.create_widgets()
-        self.populate_root()
+        self.populate_root()  # Populate the root directory when the application starts
+        self.load_shortcuts()  # Load shortcuts when the application starts
+
+        # Bind the close event to save shortcuts
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def create_widgets(self):
         # Create a frame for the entire interface
@@ -34,8 +39,12 @@ class FileExplorer:
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
         self.sidebar.bind("<<TreeviewSelect>>", self.on_shortcut_select)
 
-        # Add shortcuts
-        self.add_shortcuts()
+        # Add a context menu for the sidebar
+        self.sidebar_context_menu = tk.Menu(self.root, tearoff=0)
+        self.sidebar_context_menu.add_command(label="Remove Shortcut", command=self.remove_selected_shortcut)
+
+        # Bind right-click event to the sidebar to show the context menu
+        self.sidebar.bind("<Button-3>", self.show_sidebar_context_menu)  # For Windows/Linux
 
         # Main directory tree
         self.tree_frame = ttk.Frame(self.split_frame)
@@ -53,16 +62,30 @@ class FileExplorer:
         self.tree.bind("<<TreeviewOpen>>", self.on_expand)
         self.tree.bind("<Double-1>", self.on_double_click)
 
-    def add_shortcuts(self):
-        """Add common shortcuts to the sidebar."""
-        shortcuts = {
-            "Desktop": os.path.join(os.path.expanduser("~"), "Desktop"),
-            "Documents": os.path.join(os.path.expanduser("~"), "Documents"),
-            "Downloads": os.path.join(os.path.expanduser("~"), "Downloads"),
-            "Home": os.path.expanduser("~"),
-        }
-        for name, path in shortcuts.items():
-            self.sidebar.insert("", "end", text=name, values=[path])
+        # Create a context menu for the tree view
+        self.tree_context_menu = tk.Menu(self.root, tearoff=0)
+        self.tree_context_menu.add_command(label="Add as Shortcut", command=self.add_selected_as_shortcut)
+
+        # Bind right-click event to show the context menu
+        self.tree.bind("<Button-3>", self.show_tree_context_menu)  # For Windows/Linux
+        self.tree.bind("<Button-2>", self.show_tree_context_menu)  # For macOS
+
+    def show_sidebar_context_menu(self, event):
+        """Show the context menu for the sidebar."""
+        item_id = self.sidebar.identify_row(event.y)
+        if item_id:
+            self.sidebar.selection_set(item_id)
+            self.sidebar_context_menu.post(event.x_root, event.y_root)
+
+    def remove_selected_shortcut(self):
+        """Remove the selected shortcut from the sidebar."""
+        selected_item = self.sidebar.selection()
+        if not selected_item:
+            messagebox.showwarning("No Selection", "Please select a shortcut to remove.")
+            return
+
+        item_id = selected_item[0]
+        self.sidebar.delete(item_id)
 
     def navigate_to_path(self):
         """Navigate to the path entered in the path bar."""
@@ -154,6 +177,54 @@ class FileExplorer:
                 subprocess.run(["xdg-open", path])
         except Exception as e:
             messagebox.showerror("Error", f"Cannot open file: {e}")
+
+    def show_tree_context_menu(self, event):
+        """Show the context menu on right-click."""
+        item_id = self.tree.identify_row(event.y)
+        if item_id:
+            self.tree.selection_set(item_id)
+            self.tree_context_menu.post(event.x_root, event.y_root)
+
+    def add_selected_as_shortcut(self):
+        """Add the selected folder in the tree view as a shortcut to the sidebar."""
+        selected_item = self.tree.selection()
+        if not selected_item:
+            return
+
+        item_id = selected_item[0]
+        item_path = self.tree.item(item_id, "values")[0]
+
+        if os.path.isdir(item_path):
+            folder_name = os.path.basename(item_path)
+            self.sidebar.insert("", "end", text=folder_name, values=[item_path])
+        else:
+            messagebox.showwarning("Invalid Selection", "Please select a folder to add as a shortcut.")
+
+    def save_shortcuts(self):
+        """Save the shortcuts to a JSON file."""
+        shortcuts = {}
+        for item in self.sidebar.get_children():
+            name = self.sidebar.item(item, "text")
+            path = self.sidebar.item(item, "values")[0]
+            shortcuts[name] = path
+
+        json_file_path = os.path.join(os.path.dirname(__file__), "shortcuts.json")
+        with open(json_file_path, "w") as file:
+            json.dump(shortcuts, file)
+
+    def load_shortcuts(self):
+        """Load the shortcuts from a JSON file."""
+        json_file_path = os.path.join(os.path.dirname(__file__), "shortcuts.json")
+        if os.path.exists(json_file_path):
+            with open(json_file_path, "r") as file:
+                shortcuts = json.load(file)
+                for name, path in shortcuts.items():
+                    self.sidebar.insert("", "end", text=name, values=[path])
+
+    def on_close(self):
+        """Save shortcuts and close the application."""
+        self.save_shortcuts()
+        self.root.destroy()
 
 
 if __name__ == "__main__":
